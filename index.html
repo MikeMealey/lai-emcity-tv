@@ -1,157 +1,213 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#020703">
-  <title>Emerald City</title>
-  <style>
-    * { box-sizing:border-box; }
-    html,body { width:100%; height:100%; margin:0; overflow:hidden; background:#020703; }
-    body { position:relative; }
-    .scene {
-      position:fixed; inset:0;
-      background:
-        linear-gradient(rgba(0,18,5,.05),rgba(0,8,3,.08)),
-        url("emerald-city-4k.jpg") center/cover no-repeat;
-    }
-    #steamCanvas { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; }
-    .road-glow {
-      position:fixed; left:-18%; right:-18%; bottom:-2%; height:44%; pointer-events:none;
-      background:linear-gradient(106deg, transparent 0 27%, rgba(125,255,150,.02) 34%, rgba(205,255,215,.10) 44%, rgba(235,255,238,.055) 50%, transparent 59% 100%);
-      opacity:.32;
-      animation:roadShimmer 7s ease-in-out infinite alternate;
-      will-change:transform,opacity;
-    }
-    .lamp-pulse {
-      position:fixed; inset:0; pointer-events:none;
-      background:
-        radial-gradient(circle at 8% 8%, rgba(235,255,238,.11), transparent 8%),
-        radial-gradient(circle at 38% 17%, rgba(235,255,238,.09), transparent 6%),
-        radial-gradient(circle at 73% 17%, rgba(235,255,238,.07), transparent 6%),
-        radial-gradient(circle at 89% 12%, rgba(235,255,238,.06), transparent 6%);
-      opacity:.10;
-      animation:lampFlicker 13s steps(1,end) infinite;
-    }
-    .vignette {
-      position:fixed; inset:0; pointer-events:none;
-      background:radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,.15) 70%, rgba(0,0,0,.46) 100%);
-    }
-    #debug {
-      display:none; position:fixed; left:14px; top:14px; z-index:20;
-      padding:8px 10px; background:rgba(0,0,0,.75); color:#c9ffd3;
-      font:14px/1.3 system-ui,sans-serif; border:1px solid rgba(201,255,211,.35); border-radius:6px;
-    }
-    body.debug #debug { display:block; }
-    @keyframes roadShimmer {
-      from { transform:translateX(-2.5%); opacity:.25; }
-      to   { transform:translateX(3.5%); opacity:.42; }
-    }
-    @keyframes lampFlicker {
-      0%,5%,7%,8%,27%,29%,54%,56%,73%,75%,91%,93%,100% { opacity:.10; }
-      6%,28%,55%,74%,92% { opacity:.34; }
-      6.35%,28.25%,55.25%,74.3%,92.2% { opacity:.03; }
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Emerald City</title>
+<style>
+html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#020703}
+canvas{display:block;width:100%;height:100%;background:#020703}
+#fallback{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;display:none}
+#debug{position:fixed;left:12px;bottom:12px;padding:8px 10px;border-radius:7px;background:rgba(0,0,0,.68);color:#d8ffe0;font:12px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;display:none;white-space:pre}
+</style>
 </head>
-<body aria-label="Emerald City ambient underground scene">
-  <div class="scene" aria-hidden="true"></div>
-  <canvas id="steamCanvas" aria-hidden="true"></canvas>
-  <div class="road-glow" aria-hidden="true"></div>
-  <div class="lamp-pulse" aria-hidden="true"></div>
-  <div class="vignette" aria-hidden="true"></div>
-  <div id="debug">Steam animation: <strong>RUNNING</strong><br><span id="fps">0</span> fps</div>
+<body>
+<canvas id="scene" aria-label="Animated underground green-lit roadway"></canvas>
+<img id="fallback" src="emerald-city-4k.jpg" alt="Underground green-lit roadway">
+<div id="debug"></div>
+<script>
+(() => {
+  const canvas = document.getElementById('scene');
+  const fallback = document.getElementById('fallback');
+  const debug = document.getElementById('debug');
+  const debugOn = new URLSearchParams(location.search).has('debug');
+  if (debugOn) debug.style.display = 'block';
 
-  <script>
-  (() => {
-    const canvas = document.getElementById('steamCanvas');
-    const ctx = canvas.getContext('2d');
-    const fpsEl = document.getElementById('fps');
-    const debugMode = new URLSearchParams(location.search).has('debug');
-    if (debugMode) document.body.classList.add('debug');
+  const gl = canvas.getContext('webgl', {alpha:false, antialias:false, powerPreference:'high-performance'});
+  if (!gl) { canvas.style.display='none'; fallback.style.display='block'; return; }
 
-    let dpr = Math.min(window.devicePixelRatio || 1, 2);
-    let w = 0, h = 0;
-    const particles = [];
-    const COUNT = 28;
-
-    function resize() {
-      w = window.innerWidth;
-      h = window.innerHeight;
-      dpr = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = Math.round(w * dpr);
-      canvas.height = Math.round(h * dpr);
-      canvas.style.width = w + 'px';
-      canvas.style.height = h + 'px';
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const vs = `
+    attribute vec2 a_pos;
+    varying vec2 v_uv;
+    void main(){
+      v_uv = a_pos * 0.5 + 0.5;
+      gl_Position = vec4(a_pos,0.0,1.0);
     }
+  `;
 
-    function reset(p, initial = false) {
-      p.x = w * (0.72 + Math.random() * 0.27);
-      p.y = h * (0.48 + Math.random() * 0.18);
-      if (initial) p.y -= Math.random() * h * 0.30;
-      p.r = Math.max(28, w * (0.018 + Math.random() * 0.024));
-      p.speed = Math.max(24, h * (0.030 + Math.random() * 0.026));
-      p.drift = (-0.16 + Math.random() * 0.32) * p.speed;
-      p.alpha = 0.035 + Math.random() * 0.070;
-      p.phase = Math.random() * Math.PI * 2;
+  const fs = `
+    precision highp float;
+    varying vec2 v_uv;
+    uniform sampler2D u_tex;
+    uniform vec2 u_resolution;
+    uniform vec2 u_texSize;
+    uniform float u_time;
+
+    float hash(vec2 p){
+      return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453123);
     }
+    float noise(vec2 p){
+      vec2 i=floor(p), f=fract(p);
+      f=f*f*(3.0-2.0*f);
+      float a=hash(i), b=hash(i+vec2(1.,0.)), c=hash(i+vec2(0.,1.)), d=hash(i+vec2(1.,1.));
+      return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);
+    }
+    float fbm(vec2 p){
+      float v=0.0, a=0.5;
+      for(int i=0;i<4;i++){ v += a*noise(p); p=p*2.03+17.17; a*=0.5; }
+      return v;
+    }
+    float luma(vec3 c){ return dot(c,vec3(.2126,.7152,.0722)); }
 
-    function init() {
-      particles.length = 0;
-      for (let i = 0; i < COUNT; i++) {
-        const p = {};
-        reset(p, true);
-        particles.push(p);
+    vec2 coverUV(vec2 uv){
+      float ca=u_resolution.x/u_resolution.y;
+      float ta=u_texSize.x/u_texSize.y;
+      vec2 s=vec2(1.0), o=vec2(0.0);
+      if(ca>ta){
+        s.y=ta/ca;
+        o.y=(1.0-s.y)*0.5;
+      }else{
+        s.x=ca/ta;
+        o.x=(1.0-s.x)*0.5;
       }
+      return uv*s+o;
     }
 
-    let last = performance.now();
-    let fpsLast = last, frames = 0;
+    vec3 sampleScene(vec2 uv){ return texture2D(u_tex,coverUV(uv)).rgb; }
 
-    function draw(now) {
-      const dt = Math.min((now - last) / 1000, 0.05);
-      last = now;
-      ctx.clearRect(0, 0, w, h);
+    void main(){
+      vec2 uv=v_uv;
+      float t=u_time;
 
-      for (const p of particles) {
-        p.phase += dt * 0.7;
-        p.y -= p.speed * dt;
-        p.x += (p.drift + Math.sin(p.phase) * 7) * dt;
-        p.r += dt * 5.5;
+      // --- WET ROAD: only the lower portion moves. Geometry and camera remain locked. ---
+      float waterMask = 1.0-smoothstep(0.19,0.50,uv.y);
+      waterMask *= smoothstep(0.01,0.10,uv.y);
+      float r1=sin(uv.x*58.0 + uv.y*31.0 + t*0.85);
+      float r2=sin(uv.x*23.0 - uv.y*64.0 - t*0.57);
+      float r3=fbm(vec2(uv.x*10.0+t*0.035,uv.y*18.0-t*0.025))*2.0-1.0;
+      vec2 warp=vec2((r1*.00055+r2*.00032+r3*.00045), (r2*.00022-r1*.00012))*waterMask;
+      vec3 base=sampleScene(uv+warp);
 
-        const progress = Math.max(0, Math.min(1, (h * 0.68 - p.y) / (h * 0.46)));
-        const fade = Math.sin(Math.PI * Math.min(progress, 1));
-        const a = p.alpha * Math.max(0.18, fade);
+      // Moving specular breakup on existing wet highlights, rather than a translucent overlay.
+      float wetLum=luma(base);
+      float shimmer=(0.5+0.5*sin(uv.x*72.0 + uv.y*19.0 + t*1.15));
+      shimmer*=0.55+0.45*fbm(vec2(uv.x*17.0-t*.06,uv.y*29.0+t*.025));
+      float spec=waterMask*smoothstep(.26,.72,wetLum)*shimmer*.085;
+      base += vec3(.52,1.0,.60)*spec;
 
-        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r);
-        g.addColorStop(0, `rgba(218,255,224,${a})`);
-        g.addColorStop(0.45, `rgba(170,238,182,${a * 0.55})`);
-        g.addColorStop(1, 'rgba(145,220,160,0)');
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-        ctx.fill();
+      // --- FLUORESCENT BLOOM: derived from bright green pixels in the actual photograph. ---
+      vec2 px=1.0/u_texSize;
+      vec2 tuv=coverUV(uv);
+      vec3 b=vec3(0.0);
+      b+=texture2D(u_tex,tuv+vec2( 5.0,0.0)*px).rgb;
+      b+=texture2D(u_tex,tuv+vec2(-5.0,0.0)*px).rgb;
+      b+=texture2D(u_tex,tuv+vec2(0.0, 5.0)*px).rgb;
+      b+=texture2D(u_tex,tuv+vec2(0.0,-5.0)*px).rgb;
+      b+=texture2D(u_tex,tuv+vec2(10.0, 4.0)*px).rgb;
+      b+=texture2D(u_tex,tuv+vec2(-10.0,-4.0)*px).rgb;
+      b/=6.0;
+      float greenEmit=smoothstep(.52,.88,max(b.g,max(b.r*.72,b.b*.78)));
+      greenEmit*=smoothstep(b.r*.82,b.g,b.g);
 
-        if (p.y < h * 0.18 || p.x < w * 0.55 || p.x > w * 1.08) reset(p);
-      }
+      // Uneasy, non-rhythmic electrical instability. Very small amplitude by design.
+      float zone=floor(uv.x*13.0);
+      float phase=hash(vec2(zone,3.7))*6.2831;
+      float slow=.5+.5*sin(t*(.42+hash(vec2(zone,9.1))*.22)+phase);
+      float rough=fbm(vec2(zone*.73,t*.32));
+      float instability = 0.93 + slow*.035 + (rough-.5)*.026;
+      float rare = smoothstep(.93,.985,noise(vec2(zone*1.77,floor(t*2.4)))) * .07;
+      instability -= rare;
+      base += vec3(.27,.95,.37)*greenEmit*(.075*instability);
+      base *= 0.993 + greenEmit*(instability-0.96)*0.16;
 
-      if (debugMode) {
-        frames++;
-        if (now - fpsLast > 1000) {
-          fpsEl.textContent = Math.round(frames * 1000 / (now - fpsLast));
-          frames = 0;
-          fpsLast = now;
-        }
-      }
-      requestAnimationFrame(draw);
+      // --- HAZE: low-frequency density changes are anchored to existing mist areas. ---
+      // Two masks correspond to the actual left-center and right-side vapor in the source image.
+      float leftMask = exp(-dot((uv-vec2(.29,.57))*vec2(7.2,9.2),(uv-vec2(.29,.57))*vec2(7.2,9.2)));
+      float rightMask= exp(-dot((uv-vec2(.78,.63))*vec2(6.2,7.0),(uv-vec2(.78,.63))*vec2(6.2,7.0)));
+      float hazeMask=clamp(leftMask*.72+rightMask,0.0,1.0);
+      float fog=fbm(vec2(uv.x*5.2+t*.055,uv.y*7.5-t*.11));
+      fog=smoothstep(.38,.78,fog)*hazeMask;
+      vec3 fogColor=vec3(.33,.55,.34);
+      base=mix(base,fogColor,fog*.105);
+      base += vec3(.10,.22,.11)*fog*greenEmit*.18;
+
+      // Very restrained film grain keeps gradients alive on large displays.
+      float grain=(hash(gl_FragCoord.xy+fract(t)*271.0)-.5)*.006;
+      base+=grain;
+
+      // Static vignette only; no camera animation whatsoever.
+      vec2 q=uv-.5;
+      float vig=smoothstep(.78,.30,dot(q,q));
+      base*=mix(.78,1.0,vig);
+
+      gl_FragColor=vec4(pow(max(base,0.0),vec3(.98)),1.0);
     }
+  `;
 
-    window.addEventListener('resize', () => { resize(); init(); });
+  function shader(type, src){
+    const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s);
+    if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  let program;
+  try{
+    program=gl.createProgram();
+    gl.attachShader(program,shader(gl.VERTEX_SHADER,vs));
+    gl.attachShader(program,shader(gl.FRAGMENT_SHADER,fs));
+    gl.linkProgram(program);
+    if(!gl.getProgramParameter(program,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+  }catch(e){
+    console.error(e); canvas.style.display='none'; fallback.style.display='block';
+    if(debugOn){debug.textContent='WebGL shader error\n'+e.message;debug.style.display='block';}
+    return;
+  }
+  gl.useProgram(program);
+
+  const buf=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]),gl.STATIC_DRAW);
+  const a=gl.getAttribLocation(program,'a_pos'); gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a,2,gl.FLOAT,false,0,0);
+
+  const locRes=gl.getUniformLocation(program,'u_resolution');
+  const locTexSize=gl.getUniformLocation(program,'u_texSize');
+  const locTime=gl.getUniformLocation(program,'u_time');
+  const tex=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,tex);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);
+
+  const img=new Image();
+  img.onload=()=>{
+    gl.bindTexture(gl.TEXTURE_2D,tex);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE,img);
+    gl.uniform2f(locTexSize,img.naturalWidth,img.naturalHeight);
     resize();
-    init();
-    requestAnimationFrame(draw);
-  })();
-  </script>
+    requestAnimationFrame(frame);
+  };
+  img.onerror=()=>{canvas.style.display='none';fallback.style.display='block';};
+  img.src='emerald-city-4k.jpg';
+
+  function resize(){
+    const dpr=Math.min(window.devicePixelRatio||1,1.5); // enough for 4K TVs without absurd GPU load
+    const w=Math.max(1,Math.round(innerWidth*dpr));
+    const h=Math.max(1,Math.round(innerHeight*dpr));
+    if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;gl.viewport(0,0,w,h);}
+    gl.uniform2f(locRes,w,h);
+  }
+  addEventListener('resize',resize,{passive:true});
+
+  const start=performance.now(); let last=start, frames=0, fps=0;
+  function frame(now){
+    resize();
+    gl.uniform1f(locTime,(now-start)/1000);
+    gl.drawArrays(gl.TRIANGLES,0,6);
+    frames++;
+    if(now-last>1000){fps=Math.round(frames*1000/(now-last));frames=0;last=now;}
+    if(debugOn) debug.textContent='WebGL scene: RUNNING\n'+fps+' FPS\nCamera: LOCKED\nwater + bloom + haze: shader-integrated';
+    requestAnimationFrame(frame);
+  }
+})();
+</script>
 </body>
 </html>
